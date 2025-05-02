@@ -332,6 +332,7 @@ if __name__ == '__main__':
             version=test_version,
             max_sweeps=args.max_sweeps)
     elif args.dataset == 'waymo':
+        print('1')
         waymo_data_prep(
             root_path=args.root_path,
             info_prefix=args.extra_tag,
