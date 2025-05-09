@@ -42,7 +42,7 @@ model = dict(
             dict(type='remove_masks_by_aspect_ratio', min_threshold=1.5 ,max_threshold=4)
         ]
     ),
-    vis=True  # if set to True, it will save the bev visualization in `mask_vis` folder
+    vis=False  # if set to True, it will save the bev visualization in `mask_vis` folder
 )
 
 # dataset settings
