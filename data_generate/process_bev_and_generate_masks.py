@@ -67,13 +67,58 @@ def draw_bev_with_boxes(bev_img, annotations, x_range, y_range, resolution):
     return canvas
 
 
-def morphology_on_color_image(img, kernel_size=5):
-    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
-    b, g, r = cv2.split(img)
-    b_new = cv2.morphologyEx(b, cv2.MORPH_CLOSE, kernel)
-    g_new = cv2.morphologyEx(g, cv2.MORPH_CLOSE, kernel)
-    r_new = cv2.morphologyEx(r, cv2.MORPH_CLOSE, kernel)
-    result = cv2.merge([b_new, g_new, r_new])
+# def morphology_on_color_image(img, kernel_size=5):
+#     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (kernel_size, kernel_size))
+#     b, g, r = cv2.split(img)
+#     b_new = cv2.morphologyEx(b, cv2.MORPH_CLOSE, kernel)
+#     g_new = cv2.morphologyEx(g, cv2.MORPH_CLOSE, kernel)
+#     r_new = cv2.morphologyEx(r, cv2.MORPH_CLOSE, kernel)
+#     result = cv2.merge([b_new, g_new, r_new])
+#     return result
+
+def distance_aware_morphology(img, x_range, y_range, resolution,
+                              dist_thresholds=(30, 60, 90),
+                              kernel_sizes=(3, 5, 9, 12)):
+    """
+    根据距离分区域对图像做不同核大小的形态学闭操作。
+
+    Parameters:
+    - img: 输入的RGB图像（H×W×3）
+    - x_range, y_range: BEV图像的空间范围
+    - resolution: 每个像素对应的米数
+    - dist_thresholds: 3个距离分界值 (e.g. 30, 60, 90)
+    - kernel_sizes: 4个对应的 kernel size (e.g. 3, 5, 9, 12)
+    """
+    H, W, _ = img.shape
+
+    # 计算每个像素在BEV空间的真实坐标
+    xv, yv = np.meshgrid(
+        np.linspace(y_range[0], y_range[1], W),
+        np.linspace(x_range[0], x_range[1], H)
+    )
+    dist_map = np.sqrt(xv ** 2 + yv ** 2)
+
+    # 创建四个距离区域掩码
+    mask_1 = dist_map < dist_thresholds[0]                     # 0–30m
+    mask_2 = (dist_map >= dist_thresholds[0]) & (dist_map < dist_thresholds[1])  # 30–60m
+    mask_3 = (dist_map >= dist_thresholds[1]) & (dist_map < dist_thresholds[2])  # 60–90m
+    mask_4 = dist_map >= dist_thresholds[2]                    # 90m+
+
+    result = np.zeros_like(img)
+
+    # 对每个通道分别处理
+    for c in range(3):
+        ch = img[:, :, c]
+        out = np.zeros_like(ch)
+
+        for mask, ksize in zip([mask_1, mask_2, mask_3, mask_4], kernel_sizes):
+            if np.any(mask):
+                kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ksize, ksize))
+                processed = cv2.morphologyEx(ch, cv2.MORPH_CLOSE, kernel)
+                out[mask] = processed[mask]
+
+        result[:, :, c] = out
+
     return result
 
 
@@ -140,7 +185,14 @@ def process_batch(bev_dir, json_dir, output_dir_fused, output_dir_fused_with_box
             print(f"[ERROR] Failed to load image: {bev_path}")
             continue
 
-        closed_img = morphology_on_color_image(bev_img, kernel_size=kernel_size)
+        closed_img = distance_aware_morphology(
+                bev_img,
+                x_range=x_range,
+                y_range=y_range,
+                resolution=resolution,
+                dist_thresholds=(30, 60, 90),
+                kernel_sizes=(3, 5, 8, 10)
+            )
         fused_img = highlight_fusion(bev_img, closed_img)
 
         fused_save_path = os.path.join(output_dir_fused, fname)
@@ -167,21 +219,28 @@ def process_batch(bev_dir, json_dir, output_dir_fused, output_dir_fused_with_box
 
 
 if __name__ == "__main__":
-    bev_input_dir = "./data_test/bev"
-    json_input_dir = "./data_test/annotations"
+    # bev_input_dir = "./data_test/bev"
+    # json_input_dir = "./data_test/annotations"
 
-    output_dir_fused = "./data_test/bev_fused_only"               # 融合后（无框）图像输出
-    output_dir_fused_with_boxes = "./data_test/bev_fused_with_boxes"  # 融合后绘制检测框图像输出
-    output_dir_mask = "./data_test/bev_masks"                         # 蒙版输出
+    # output_dir_fused = "./data_test/bev_fused_only"               # 融合后（无框）图像输出
+    # output_dir_fused_with_boxes = "./data_test/bev_fused_with_boxes"  # 融合后绘制检测框图像输出
+    # output_dir_mask = "./data_test/bev_masks"                         # 蒙版输出
 
+    bev_input_dir = "/home/zhaoyuting/DAIR/ImageNet_background_and_distance_improve/bev"
+    json_input_dir = "/home/zhaoyuting/DAIR/single-infrastructure-side/label/virtuallidar"
+
+    output_dir_fused = "/home/zhaoyuting/DAIR/ImageNet_background_and_distance_improve/bev_fused_only"               # 融合后（无框）图像输出
+    output_dir_fused_with_boxes = "/home/zhaoyuting/DAIR/ImageNet_background_and_distance_improve/bev_fused_with_boxes"  # 融合后绘制检测框图像输出
+    output_dir_mask = "/home/zhaoyuting/DAIR/ImageNet_background_and_distance_improve/bev_masks"                         # 蒙版输出
+    
     process_batch(
         bev_dir=bev_input_dir,
         json_dir=json_input_dir,
         output_dir_fused=output_dir_fused,
         output_dir_fused_with_boxes=output_dir_fused_with_boxes,
         output_dir_mask=output_dir_mask,
-        x_range=(0, 300),
-        y_range=(-200, 200),
+        x_range=(0, 150),
+        y_range=(-60, 60),
         resolution=0.1,
         kernel_size=5
     )

@@ -64,7 +64,7 @@ class BEVGenerator:
             ground_height = pc_z.masked_select(ground_mask).view(B, -1).mean(dim=1, keepdim=True)  # B x 1
             relative_z = pc_z - ground_height  # B x N
             center = 2.0  # 地面+2m
-            width = 0.75
+            width = 2.0
             z_norm = torch.exp(-((relative_z - center) ** 2) / (2 * width ** 2))
         else:
             z_min, z_max = pc_z.min(), pc_z.max()
@@ -83,11 +83,22 @@ class BEVGenerator:
         i_norm = i_norm.unsqueeze(-1)
         final_colors = base_colors * i_norm
         final_colors = final_colors.clamp(0, 255)
+        
+        # 添加这一行实现反色
+        final_colors = 255 - final_colors
 
         if self.remove_ground_points:
             final_colors.masked_fill_(ground_mask.unsqueeze(-1), 0)
 
         bev_map[batch_id, rank_x, rank_y, :] = final_colors
+
+        # # 替换背景像素（颜色值非常小的）为 ImageNet 风格的背景颜色
+        # background_color = torch.tensor([123, 116, 103], dtype=torch.float32, device=point_clouds.device)
+
+        # # 条件：RGB 所有通道都小于 10（表示为背景）
+        # mask_background = (bev_map < 10).all(dim=-1)  # shape: (B, H, W)
+        # bev_map[mask_background] = background_color
+        
         return bev_map
 
 
@@ -107,17 +118,21 @@ def pcd_to_tensor(pcd_path):
     return tensor
 
 
-def batch_generate_bev(input_dir, output_dir):
+def batch_generate_bev(input_dir, output_dir, max_files=None):
     os.makedirs(output_dir, exist_ok=True)
     bev_gen = BEVGenerator(
         resolution=0.1,
-        x_range=(0, 200),
+        x_range=(0, 150),
         y_range=(-60, 60),
         z_range=(-30,80),
         remove_ground_points=True
     )
 
     pcd_files = sorted([f for f in os.listdir(input_dir) if f.endswith(".pcd")])
+    
+    if max_files is not None:
+        pcd_files = pcd_files[:max_files]
+    
     for fname in tqdm(pcd_files):
         path = os.path.join(input_dir, fname)
         try:
@@ -131,4 +146,4 @@ def batch_generate_bev(input_dir, output_dir):
 
 
 if __name__ == "__main__":
-    batch_generate_bev("./data_test/velodyne_0", "./data_test/bev")  # 可自定义高度范围
+    batch_generate_bev("/home/zhaoyuting/DAIR/single-infrastructure-side-velodyne", "/home/zhaoyuting/DAIR/ImageNet_background_and_distance_improve/bev", max_files=1500)  # 可自定义高度范围
